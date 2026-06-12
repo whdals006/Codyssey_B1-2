@@ -147,3 +147,213 @@ tree
 |-- runtime
 `-- scripts
 ```
+
+
+## 2. 앱 실행 환경 구성 및 최초 실행
+
+### 2-1. runtime 디렉토리 구조 생성
+
+```bash
+mkdir -p runtime/upload_files
+mkdir -p runtime/api_keys
+mkdir -p runtime/logs
+```
+
+### 2-2. secret.key 파일 생성
+
+```bash
+echo "agent_api_key_test" > runtime/api_keys/secret.key
+```
+
+### 2-3. 일반 사용자 생성
+
+```bash
+useradd -m student
+```
+
+| 옵션 | 뜻 |
+| :--- | :--- |
+| ```-m``` | /home 경로에 새로 만들 계정의 전용 폴더 생성 |
+
+* 비밀번호 설정
+
+```bash
+passwd student
+```
+```bash
+1234
+```
+
+### 2-4. 작업 폴더 권한 변경
+
+```bash
+chown -R student:student /workspace/runtime
+```
+
+| 코드 | 의미 | 설명 |
+| :--- | :--- | :--- |
+| chown | Change Owner | 소유자와 소유 그룹을 변경 |
+| -R | Recursive | 재귀적 적용 옵션. 하위 디렉토리 및 파일까지 변경 |
+| student:student | User:Group | 변경할 소유자와 소유 그룹 |
+
+### 2-5. student 계정으로 전환
+
+```bash
+su - student
+```
+
+### 2-6. 환경변수 설정
+
+
+* 환경변수 작성하기
+
+```bash
+nano ~/.bashrc
+```
+
+* 환경변수
+
+```bash
+export AGENT_HOME=/workspace/runtime
+export AGENT_PORT=15034
+export AGENT_UPLOAD_DIR=$AGENT_HOME/upload_files
+export AGENT_KEY_PATH=$AGENT_HOME/api_keys
+export AGENT_LOG_DIR=$AGENT_HOME/logs
+export MEMORY_LIMIT=128
+export CPU_MAX_OCCUPY=30
+export MULTI_THREAD_ENABLE=true
+```
+
+* 환경변수 반영하기
+
+```bash
+source ~/.bashrc
+```
+
+| 명령어 | 설명 |
+| :--- | :--- |
+| source | 텍스트 파일에 적힌 리눅스 명령어들을 현재 실행 중인 터미널 쉘(Shell)에 즉시 실행(적용)시키는 명령어 |
+
+
+* 추가 설명
+ 
+    * ```.bashrc``` 파일
+
+        | 구조 | 설명 |
+        | :--- | :--- |
+        | 앞의 점(```.```) | 리눅스에서 파일명 앞에 붙는 점은 '숨김 파일(Hidden File)'을 의미 |
+        | 뒤의 ```rc``` | Run Commands (또는 Run Control)의 약자. "프로그램이 시작될 때 자동으로 실행할 명령어들을 모아둔 파일"이라는 뜻 |
+
+    * ```source```명령어를 쓰는 이유
+
+        ```nano```로 파일을 수정하고 저장했다고 해서 지금 열려 있는 터미널 창이 그 사실을 자동으로 알지는 못한다. 원래는 터미널 창을 껐다가 완전히 새로 켜야 변경된 설정이 반영되지만, source 명령어를 쓰면 창을 끄지 않고도 방금 수정된 내용을 현재 터미널에 즉시 동기화(새로고침)할 수 있다.
+ 
+* 환경변수 확인하기
+
+ ```bash
+ env | grep AGENT
+ ```
+
+ | 명령어 | 의미 | 설명 |
+ | :--- | :--- | :--- |
+ | env | Environment | 현재 로그인된 쉘 세션에 설정되어 있는 모든 환경변수의 목록을 출력하는 리눅스 표준 명령어 |
+ | \| | Pipe | 앞 명령어의 출력 결과(Output)를 뒤 명령어의 입력 데이터(Input)로 바로 넘겨주는 통로 역할 |
+ | grep| Global Regular Expression Print | 입력받은 텍스트 데이터 중에서 정해진 패턴(여기서는 AGENT라는 글자)이 포함된 줄(Line)만 찾아서 화면에 출력하는 검색 명령어 |
+
+### 2-7. 실행 파일 권한 확인
+
+* 현재 실행 파일 권한
+
+```bash
+ls -l /workspace/app
+```
+
+```
+-rw-r--r-- 1 root root 6502016 Jun 12 13:13 agent-leak-app-x86
+```
+
+* 실행 권한 부여하기
+
+```bash
+chmod +x /workspace/app/agent-leak-app-x86
+```
+
+```
+-rwxr-xr-x 1 root root 6502016 Jun 12 13:13 agent-leak-app-x86
+```
+
+### 2-8. 바이너리(Binary) 정보 확인
+
+```bash
+file /workspace/app/agent-leak-app-x86
+```
+```
+/workspace/app/agent-leak-app-x86: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=d3d060968c2b8c41aa17bbc6e127f0d462c98025, stripped
+```
+
+* 추가 설명
+
+    * 바이너리(Binary)란?
+    
+        : 사람이 작성한 소스 코드를 컴퓨터가 알아들을 수 있도록 0과 1로 이루어진 이진수(Binary number) 데이터로 완전히 번역해 놓은 실행 파일
+
+    * 결과 해석
+
+        | 코드 | 의미 | 설명 |
+        | :--- | :--- | :--- |
+        | ELF | Executable and Linkable Format | 리눅스의 표준 실행 파일 형식 |
+        | LSB | Least Significant Bit | 컴퓨터가 메모리에 숫자를 저장할 때, 작은 단위의 숫자(하위 바이트)부터 차례대로 저장하는 방식 |
+        | executable |  | 문서나 사진 파일이 아니라, 터미널에서 명령어를 입력해 직접 실행할 수 있는 프로그램이라는 뜻 |
+
+### 2-9. 앱 최초 실행
+
+```bash
+.agent-leak-app-x86
+```
+
+* 실행 결과
+
+```
+>>> Starting Agent Boot Sequence...
+[1/6] Checking User Account               [OK]
+   ... Running as service user 'student' (uid=1000)
+[2/6] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/6] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/6] Verifying Log Permission            [OK]
+   ... Log directory is writable: /workspace/runtime/logs
+[6/6] Verifying Mission Environment       [OK]
+   ... MEMORY_LIMIT=128MB, CPU_MAX_OCCUPY=30%, MULTI_THREAD_ENABLE=True
+------------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+2026-06-12 13:32:35,738 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-06-12 13:32:35,739 [INFO] Agent listening at port 15034
+
+==================================================
+ [ Agent Initiate ] Resource Check 
+==================================================
+ [ MEMORY ] Limit: 128MB                [ WARNING: Recommend Over 256MB ]
+ [ CPU    ] Limit: 30%                  [ OK ]
+ [ THREAD ] Concurrency: True           [ WARNING ]
+--------------------------------------------------
+ >>> SYSTEM WARNING: POTENTIAL DEADLOCK IN CONCURRENT MODE.
+==================================================
+
+2026-06-12 13:32:37,786 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-06-12 13:32:40,903 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-06-12 13:32:43,951 [INFO] [MemoryWorker] Current Heap: 75MB
+2026-06-12 13:32:47,008 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-06-12 13:32:50,035 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-06-12 13:32:53,079 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-06-12 13:32:53,080 [CRITICAL] [MemoryGuard] Memory limit exceeded (150MB >= 128MB) / (Recommend Over 256MB)
+2026-06-12 13:32:53,080 [CRITICAL] [MemoryGuard] Self-terminating process 85856 to prevent system instability.
+
+
+>>> [SYSTEM] SELF-TERMINATED (Memory Limit Exceeded) <<<
+
+Killed
+```
