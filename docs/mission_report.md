@@ -357,3 +357,151 @@ Agent READY
 
 Killed
 ```
+
+
+## 3. monitor.sh 작성
+
+### 3-1. monitor.sh 생성
+
+```bash
+nano /workspace/scripts/monitor.sh
+```
+
+### 3-2. monitor.sh 작성
+
+```
+#!/bin/bash
+
+PID=$1
+LOG_FILE=/workspace/logs/monitor.log
+
+if [ -z "$PID" ]; then
+    echo "Usage: ./monitor.sh <PID>"
+    exit 1
+fi
+
+echo "=== Monitoring PID: $PID ===" >> $LOG_FILE
+
+while true
+do
+    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+    STATS=$(ps -p $PID -o %cpu,%mem --no-headers)
+
+    if [ -z "$STATS" ]; then
+        echo "[$TIMESTAMP] Process ended." >> $LOG_FILE
+        break
+    fi
+
+    CPU=$(echo $STATS | awk '{print $1}')
+    MEM=$(echo $STATS | awk '{print $2}')
+
+    echo "[$TIMESTAMP] PID:$PID CPU:${CPU}% MEM:${MEM}%" >> $LOG_FILE
+
+    sleep 2
+done
+```
+
+### 3-3. 실행 권한 부여하기
+
+```bash
+chmod +x monitor.sh
+```
+
+### 3-4. monitor.sh 코드 분석
+
+1. 초기 설정 및 예외 처리 (Initialization)
+
+    ```bash
+    #!/bin/bash
+    ```
+    
+    : bash 쉘을 사용해서 스크립트를 해석하고 실행해라.
+
+    | 코드 | 의미 | 설명 |
+    | :--- | :--- | :--- |
+    | #! | Shebang | 운영체제에게 "이 스크립트를 어떤 프로그램으로 실행해야 하는지" 알려준다. |
+
+2. 무한 루프와 상태 수집 (Monitoring Loop)
+
+    ```bash
+    PID=$1
+    LOG_FILE=/workspace/logs/monitor.log
+    ```
+
+    * ```PID=$1``` : 스크립트를 실행할 때 뒤에 붙이는 첫 번째 인자를 PID 라는 변수에 저장한다.
+
+    * ```LOG_FILE=...``` : 모니터링한 데이터를 기록할 로그 파일의 절대 경로를 변수로 지정한다.
+
+    ```bash
+    if [ -z "$PID" ]; then
+        echo "Usage: ./monitor.sh <PID>"
+        exit 1
+    fi
+    ```
+
+    * ```-z "$PID``` : 변수 PID가 비어있는지(zero) 확인.
+
+    * ```exit 1``` 
+
+        | 코드 | 의미 | 설명 |
+        | :--- | :--- | :--- |
+        | exit 0 | 정상 종료 | "아무 문제 없이 성공적으로 작업을 끝마쳤다" |
+        | exit 1 | 비정상 종료 | "작업 도중 어떤 문제가 생겨서 비정상적으로 종료되었다" |
+
+    ```bash
+    while true
+    do
+    ```
+
+    * ```while true``` : 조건이 항상 참이므로 내부 블록을 무한히 반복 실행.
+
+    ```bash
+    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+    ```
+
+    * ```date '+%Y-%m-%d %H:%M:%S'``` : 현재 시간을 ```년-월-일 시:분:초``` 형식으로 출력
+
+    ```bash
+    STATS=$(ps -p $PID -o %cpu,%mem --no-headers)
+    ```
+
+    | 코드 | 의미 | 설명 |
+    | :--- | :--- | :--- |
+    | ```ps``` | Process Status | 현재 시스템에서 실행 중인 프로세스의 상태를 보여주는 명령어. 윈도우의 '작업 관리자'와 유사한 역할. |
+    | ```-p``` | Process | 특정 PID를 지정하여 정보를 조회 |
+    | ```-o``` | Output | 원하는 출력 항목을 사용자가 직접 지정 |
+    | ```--no-headers``` | 옵션 | 기본적으로 ```ps``` 명령어를 실행하면 첫 번째 줄에 ID, %CPU 같은 열 이름(header)가 표시되는데, 이 옵션을 사용하면 첫 줄을 생략하고 순수하게 데이터만 출력한다. |
+
+3. 프로세스 종료 감지 및 데이터 가공 (Data Parsing)
+
+    ```bash
+    if [ -z "$STATS" ]; then
+        echo "[$TIMESTAMP] Process ended." >> $LOG_FILE
+        break
+    fi
+    ```
+
+    : ```STATS``` 변수가 비어있으면 로그 파일에 "Process ended." 기록을 남기고 무한 루프 탈출
+
+    ```bash
+    CPU=$(echo $STATS | awk '{print $1}')
+    MEM=$(echo $STATS | awk '{print $2}')
+    ``` 
+
+    : ```STATS``` 변수에 들어있던 첫번째 덩어리($1)는 ```CPU```에 담고,
+    두번째 덩어리($2)는 ```MEM```에 담는다.
+
+4. 로그 기록 및 대기 (Logging & Sleep)
+
+    ```bash
+    echo "[$TIMESTAMP] PID:$PID CPU:${CPU}% MEM:${MEM}%" >> $LOG_FILE
+    ```
+
+    : 출력 예시 ```[2026-06-12 14:00:02] PID:1234 CPU:1.5% MEM:5.1%```
+
+    ```bash
+    sleep 2
+    ```
+
+    : 2초 대기
