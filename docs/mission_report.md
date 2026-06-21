@@ -308,7 +308,7 @@ file /workspace/app/agent-leak-app-x86
 ### 2-9. 앱 최초 실행
 
 ```bash
-.agent-leak-app-x86
+./agent-leak-app-x86
 ```
 
 * 실행 결과
@@ -367,7 +367,7 @@ Killed
 nano /workspace/scripts/monitor.sh
 ```
 
-### 3-2. monitor.sh 작성
+### 3-2. monitor.sh 작성 (초기버전)
 
 ```
 #!/bin/bash
@@ -408,7 +408,7 @@ done
 chmod +x monitor.sh
 ```
 
-### 3-4. monitor.sh 코드 분석
+### 3-4. monitor.sh (초기버전) 코드 분석
 
 1. 초기 설정 및 예외 처리 (Initialization)
 
@@ -421,6 +421,7 @@ chmod +x monitor.sh
     | 코드 | 의미 | 설명 |
     | :--- | :--- | :--- |
     | #! | Shebang | 운영체제에게 "이 스크립트를 어떤 프로그램으로 실행해야 하는지" 알려준다. |
+
 
 2. 무한 루프와 상태 수집 (Monitoring Loop)
 
@@ -473,6 +474,7 @@ chmod +x monitor.sh
     | ```-o``` | Output | 원하는 출력 항목을 사용자가 직접 지정 |
     | ```--no-headers``` | 옵션 | 기본적으로 ```ps``` 명령어를 실행하면 첫 번째 줄에 ID, %CPU 같은 열 이름(header)가 표시되는데, 이 옵션을 사용하면 첫 줄을 생략하고 순수하게 데이터만 출력한다. |
 
+
 3. 프로세스 종료 감지 및 데이터 가공 (Data Parsing)
 
     ```bash
@@ -492,6 +494,7 @@ chmod +x monitor.sh
     : ```STATS``` 변수에 들어있던 첫번째 덩어리($1)는 ```CPU```에 담고,
     두번째 덩어리($2)는 ```MEM```에 담는다.
 
+
 4. 로그 기록 및 대기 (Logging & Sleep)
 
     ```bash
@@ -505,3 +508,601 @@ chmod +x monitor.sh
     ```
 
     : 2초 대기
+
+
+### 3-5. monitor.sh (수정버전)
+
+```bash
+#!/bin/bash
+
+PARENT_PID=$1
+LOG_FILE=/workspace/logs/monitor.log
+
+if [ -z "$PARENT_PID" ]; then
+    echo "Usage: ./monitor.sh <parent_pid>"
+    exit 1
+fi
+
+echo "=== Monitoring Parent PID: $PARENT_PID ===" >> $LOG_FILE
+
+while true
+do
+    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # parent 살아있는지 확인
+    if ! ps -p $PARENT_PID > /dev/null 2>&1; then
+        echo "[$TIMESTAMP] Process ended." >> $LOG_FILE
+        break
+    fi
+
+    # parent 정보
+    PARENT_STATS=$(ps -p $PARENT_PID -o %cpu,rss --no-headers)
+
+    PARENT_CPU=$(echo $PARENT_STATS | awk '{print $1}')
+    PARENT_RSS=$(echo $PARENT_STATS | awk '{print $2}')
+
+    # child PID 찾기
+    CHILD_PID=$(ps --ppid $PARENT_PID -o pid= | xargs)
+
+    CHILD_CPU=0
+    CHILD_RSS=0
+
+    if [ ! -z "$CHILD_PID" ]; then
+        CHILD_STATS=$(ps -p $CHILD_PID -o %cpu,rss --no-headers)
+
+        if [ ! -z "$CHILD_STATS" ]; then
+            CHILD_CPU=$(echo $CHILD_STATS | awk '{print $1}')
+            CHILD_RSS=$(echo $CHILD_STATS | awk '{print $2}')
+        fi
+    fi
+
+    TOTAL_CPU=$(awk "BEGIN {print $PARENT_CPU + $CHILD_CPU}")
+    TOTAL_RSS_KB=$((PARENT_RSS + CHILD_RSS))
+    TOTAL_RSS_MB=$((TOTAL_RSS_KB / 1024))
+
+    echo "[$TIMESTAMP] Parent:$PARENT_PID Child:${CHILD_PID:-None} CPU:${TOTAL_CPU}% MEM:${TOTAL_RSS_MB}MB" >> $LOG_FILE
+
+    sleep 2
+done
+```
+
+### 3-6. monitor.sh (수정버전) 코드 분석
+
+1. 초기화 및 예외 처리 (Initialization)
+
+    ```bash
+    #!/bin/bash
+
+    PARENT_PID=$1
+    LOG_FILE=/workspace/logs/monitor.log
+    ```
+
+    * ```PARENT_PID=$1``` : 스크립트를 실행할 때 입력한 첫 번째 인자값(parent PID)을 저장.
+
+    * ```LOG_FILE=...``` : 관제 데이터를 기록할 경로
+
+    ```bash
+    if [ -z "$PARENT_PID" ]; then
+        echo "Usage: ./monitor.sh <parent_pid>"
+        exit 1
+    fi
+    ```
+
+    * 인자값이 비어있으면 사용법을 안내하고 즉시 종료(exit 1)
+
+
+2. 무한 루프 및 부모 상태 확인
+
+    ```bash
+    while true
+    do
+        TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+        # parent 살아있는지 확인
+        if ! ps -p $PARENT_PID > /dev/null 2>&1; then
+            echo "[$TIMESTAMP] Process ended." >> $LOG_FILE
+            break
+        fi
+    ```
+
+    * ```if ! ps -p $PARENT_PID ...``` : 부모 프로세스가 살아있는지 확인
+
+        * ```-p``` (Process ID) : 전체 프로세스 목록 중에 내가 확인하고 싶은 특정 PID만 조회
+
+        * ```> /dev/null 2>&1``` 은 ps 명령어가 화면에 출력하는 메시지를 쓰레기통(```/dev/null```)으로 버려서 화면을 깔끔하게 유지하라는 뜻.
+
+            * ```>``` (Redirection) : 명령어의 실행 결과를 화면이 아니라 ```파일```이나 ```장치```로 방향을 틀어서 집어넣을 때 사용. 앞에 숫자가 생략되면 기본값인 ```1```이 적용.
+
+            * ```/dev/null``` : 리눅스 시스템에 존재하는 특별한 가상 장치 파일. 이 파일로 보내진 모든 데이터는 흔적도 없이 사라짐.
+
+            * 리눅스의 3가지 표준 스트림
+
+                | 숫자 | 의미 | 설명
+                | :--- | :--- | :--- |
+                | 0 | 표준 입력 | 키보드로부터 들어오는 입력
+                | 1 | 표준 출력 | 명령어가 성공했을 때 나오는 정상적인 결과 메시지 |
+                | 2 | 표준 에러 | 명령어가 실패했을 때 나오는 에러 메시지 |
+
+            * ```2>``` : 2(표준 에러)의 방향을 바꾼다.
+
+            * ```&1``` : 파일이 아니라 1번 통로(표준 출력)를 의미한다고 알려주기 위해 ```&```기호를 붙임.
+
+        * 부모 프로세스가 죽어서 ```ps```명령이 실패(```!```)하면, 로그 남기고 루프 탈출.
+
+    ```bash
+    # parent 정보
+    PARENT_STATS=$(ps -p $PARENT_PID -o %cpu,rss --no-headers)
+
+    PARENT_CPU=$(echo $PARENT_STATS | awk '{print $1}')
+    PARENT_RSS=$(echo $PARENT_STATS | awk '{print $2}')
+    ```
+
+    * 부모의 CPU 사용률과 RSS(Resident Set Size, 물리 메모리 실제 사용량)를 추출.
+
+    * ```awk``` : 텍스트(데이터) 처리 및 분석 명령어. 텍스트 파일이나 로그 데이터가 들어왔을 때, 이를 표(table) 형태로 인식해서 원하는 대로 자르고, 붙이고, 계산하는 역할을 한다.
+
+3. 자식 프로세스 탐색 및 데이터 추출
+
+    ```bash
+    # child PID 찾기
+
+    CHILD_PID=$(ps --ppid $PARENT_PID -o pid= | xargs)
+    ```
+
+    * ```ps --ppid $PARENT_PID``` : 특정 부모PID(--ppid)를 가진 자식 프로세스들을 다 찾아라
+
+        * ```--ppid``` (Parent Process ID) : 특정 부모 프로세스가 낳은 자식 프로세스들을 전부 찾는 옵션. 
+
+    * ```-o pid=``` : 제목(Header)없이 순수하게 자식의 PID 숫자만 출력.
+
+        * ```-o``` (Output Format): ps 명령어가 기본으로 보여주는 항목들 중에서 내가 보고 싶은 항목만 골라서 화면에 출력하는 옵션. 항목 뒤에 등호(```=```)를 붙이면 출력 결과 맨 위에 나오는 제목(Header) 텍스트를 지우고 순수한 데이터 값만 출력.
+
+    * ```| xargs``` : 만약 자식이 여러 개라면 줄바꿈으로 출력되는데, 이를 한 줄로 이어 붙인다.
+
+        * ```xargs``` (eXtended ARGuments) : 앞 명령어의 출력 결과를 받아와서 뒤에오는 명령어의 '인자'로 넘겨서 실행해 주는 명령어.
+
+            * 파이프(```|```)가 던져주는 데이터를 못받아먹는 명령어(```rm```,```cp```,```ps```) 앞에 씀.
+
+            * ```xargs``` 뒤에 아무 명령어도 안적으면, 들어온 문자열에서 줄바꿈(enter), 탭(tab), 공백(space)들을 전부 하나의 깔끔한 공백 기호로 합쳐서 한 줄로 길게 펴주는 역할을 한다.
+
+    ```bash
+    CHILD_CPU=0
+    CHILD_RSS=0
+
+    if [ ! -z "$CHILD_PID" ]; then
+        CHILD_STATS=$(ps -p $CHILD_PID -o %cpu,rss --no-headers)
+
+        if [ ! -z "$CHILD_STATS" ]; then
+            CHILD_CPU=$(echo $CHILD_STATS | awk '{print $1}')
+            CHILD_RSS=$(echo $CHILD_STATS | awk '{print $2}')
+        fi
+    fi
+    ```
+
+    * 기본적으로 자식의 자원 사용량 변수를 ```0```으로 초기화 (자식이 없을 수도 있기 때문)
+
+    * 만약 자식 PID(```CHILD_PID```)가 존재하면(```! -Z```), 부모와 같은 방식으로 자식 프로세스의 CPU 사용률과 물리 메모리(RSS) 용량을 뽑아낸다.
+
+
+4. 부모와 자식의 데이터 합산 및 기록 (Data Aggregation)
+
+    ```bash
+    TOTAL_CPU=$(awk "BEGIN {print $PARENT_CPU + $CHILD_CPU}")
+    ```
+
+    * shell 스크립트 내부의 기본적인 산술 연산은 소수점 계산을 못한다. 그래서 소수점 연산이 가능한 ```awk "BEGIN {print ...}``` 툴을 빌려서 계산.
+
+    * ```BEGIN``` 블록 : "뒤에 파일이 있든 없든 상관 말고, 프로그램이 시작(begin)되자마자 괄호 안에 있는 코드를 무조건 먼저 한 번 실행해라" 라는 특수 명령어. 
+
+    ```bash
+    TOTAL_RSS_KB=$((PARENT_RSS + CHILD_RSS))
+    TOTAL_RSS_MB=$((TOTAL_RSS_KB / 1024))
+    ```
+
+    * 부모의 메모리 용량(KB)과 자식의 메모리 용량(KB)을 더해 총 용량 구한다.
+
+    * KB 단위를 1024로 나눠서 MB 단위로 환산.
+
+    ```bash
+        echo "[$TIMESTAMP] Parent:$PARENT_PID Child:${CHILD_PID:-None} CPU:${TOTAL_CPU}% MEM:${TOTAL_RSS_MB}MB" >> $LOG_FILE
+
+        sleep 2
+    done
+    ```
+
+    * ```${CHILD_PID:-None}``` : 만약 자식 PID가 비어있으면 화면에 ```None```이라고 출력하고, 있으면 자식 PID를 출력.
+
+
+## 4. OOM 분석
+
+### 4-1. OOM (Out of Memory) 란?
+
+* 정의
+
+ : 운영체제(OS)나 프로그램이 사용할 수 있는 메모리(RAM) 공간이 완전히 바닥났을 때 시스템을 보호하기 위해 발생시키는 '비상 정지 장치'.
+
+* 나타나는 현상 
+
+ : 프로그램이 메모리 부족으로 터질 때, 시스템 전체가 뻗는 것을 막기 위해 ```oom killer``` 가 메모리를 가장 많이 먹고 있는 프로세스를 강제로 kill 한다.
+
+* 발생하는 원인
+
+    * 메모리 누수 (Memory Leak) : 프로그램이 작업을 수행하기 위해 메모리를 할당받아 쓴 뒤, 일이 끝났으면 다시 메모리를 반납 해야하는데 반납하지 않고 계속 붙자고 있는 현상.
+
+    * 순간적인 트래픽 폭주 (Traffic Spike) : 웹 서버에 평소보다 많은 사용자가 동시에 접속하여 수많은 요청을 처리하다 보면, 각 요청을 담당하는 스레드나 객체들이 일시적으로 늘어나는데, 이때 순간적으로 필요한 총 메모리 용량이 물리 RAM 크기를 넘어서면 OOM이 발생.
+
+    * 잘못된 메모리 제한(Limit) 설정 : 특정 컨테이너의 설정 파일에 memory limit 한계선을 너무 작게 잡으면, 앱이 조금만 무거운 연산을 해도 컨테이너 내부에서 OOM killer가 발동해 앱을 죽인다.
+
+* 추가 설명
+
+    * 힙(Heap) : 프로그램이 실행되는 도중에 필요할 때마다 실시간으로 원하는 크기만큼 메모리를 빌려서 사용하는 자유 메모리 공간.
+
+### 4-2. 주어진 app 분석
+
+* app 실행
+
+ ```bash
+ ./agent-leak-app-x86
+ ```
+
+* PID 찾기
+
+ ```bash
+ ps -ef | grep agent
+ ```
+
+* monitor.log 실행
+
+ ```bash
+ /workspace/scripts/monitor.sh PID
+ ```
+
+* monitor.log 확인하기
+
+ ```bash
+ cat /workspace/logs/monitor.log
+ ```
+
+* monitor.log 내용만 다 지우기
+
+ ```bash
+ > /workspace/logs/monitor.log
+ ```
+
+### 4-3. MEMORY_LIMIT=128 일 때
+
+
+
+### 4-4. MEMORY_LIMIT=512 일 때
+
+#### 4-4-1. MEMORY_LIMIT 변경
+
+* 변경
+
+    ```student 계정```에서
+
+    ```bash
+    nano ~/.bashrc
+    ```
+
+    ```bash
+    # 기존 128 에서 512로 변경
+
+    export MEMORY_LIMIT=512
+    ```
+
+* 적용
+
+    ```bash
+    source ~/.bashrc
+    ```
+
+* 확인
+
+    ```bash
+    echo $MEMORY_LIMIT
+    ```
+
+### 4-5. MEMORY_LIMIT=512로 바꾸고 난 후 나타난 증상
+
+```bash
+student@3cf32eabbc31:/workspace/app$ ./agent-leak-app-x86
+>>> Starting Agent Boot Sequence...
+[1/6] Checking User Account               [OK]
+   ... Running as service user 'student' (uid=1000)
+[2/6] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/6] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/6] Verifying Log Permission            [OK]
+   ... Log directory is writable: /workspace/runtime/logs
+[6/6] Verifying Mission Environment       [OK]
+   ... MEMORY_LIMIT=512MB, CPU_MAX_OCCUPY=30%, MULTI_THREAD_ENABLE=True
+------------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+2026-06-17 13:55:20,249 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-06-17 13:55:20,249 [INFO] Agent listening at port 15034
+
+==================================================
+ [ Agent Initiate ] Resource Check 
+==================================================
+ [ MEMORY ] Limit: 512MB                [ OK ]
+ [ CPU    ] Limit: 30%                  [ OK ]
+ [ THREAD ] Concurrency: True           [ WARNING ]
+--------------------------------------------------
+ >>> SYSTEM WARNING: POTENTIAL DEADLOCK IN CONCURRENT MODE.
+==================================================
+
+2026-06-17 13:55:22,257 [WARNING] [AgentWorker] Initializing concurrent transaction processors...
+2026-06-17 13:55:22,259 [WARNING] [System] CAUTION: Strict resource locking is enabled.
+2026-06-17 13:55:27,286 [INFO] [Worker-Thread-1] Process Started. Attempting to lock [Shared_Memory_A]...
+2026-06-17 13:55:27,287 [INFO] [AgentWorker][Worker-Thread-2] Process Started. Attempting to lock [Socket_Pool_B]...
+2026-06-17 13:55:27,288 [INFO] [AgentWorker] Waiting for worker threads to complete transactions...
+2026-06-17 13:55:27,288 [INFO] [AgentWorker][Worker-Thread-2] LOCK ACQUIRED: [Socket_Pool_B]. (Holding...)
+2026-06-17 13:55:27,288 [INFO] [AgentWorker][Worker-Thread-1] LOCK ACQUIRED: [Shared_Memory_A]. (Holding...)
+2026-06-17 13:55:27,289 [INFO] [AgentWorker][Worker-Thread-2] Establishing network connections in Pool B...
+2026-06-17 13:55:27,290 [INFO] [AgentWorker][Worker-Thread-1] Processing critical data in Memory A...
+2026-06-17 13:55:29,297 [INFO] [AgentWorker][Worker-Thread-1] Need resource [Socket_Pool_B] to finish job.
+2026-06-17 13:55:29,297 [INFO] [AgentWorker][Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
+2026-06-17 13:55:29,300 [INFO] [AgentWorker][Worker-Thread-2] Need resource [Shared_Memory_A] to write logs.
+2026-06-17 13:55:29,301 [INFO] [AgentWorker][Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
+```
+
+### 4-6. 로그 분석
+
+* Thread 1 
+
+    * ```Shared_Memory_A``` 를 lock 함.
+    * ```Socket_Pool_B``` 를 기다리는 중.
+
+* Thread 2
+
+    * ```Socket_Pool_B``` 를 lock 함.
+    * ```Shared_Memory_A``` 를 기다리는 중.
+
+* Deadlock 현상이 발생
+
+### 4-7. Deadlock 증거 수집
+
+* 프로세스 죽었는지 확인
+
+```bash
+ps -ef | grep agent | grep -v grep
+```
+
+```bash
+# 결과
+
+student   184713  163493  0 13:55 pts/1    00:00:00 ./agent-leak-app-x86
+student   184714  184713  0 13:55 pts/1    00:00:00 ./agent-leak-app-x86
+```
+
+* CPU , RSS 확인
+
+```bash
+ps -o pid,ppid,%cpu,rss,cmd -C agent-leak-app-x86
+```
+
+```bash
+# 결과
+
+   PID    PPID %CPU   RSS CMD
+184713  163493  0.0  2092 ./agent-leak-app-x86
+184714  184713  0.0 17960 ./agent-leak-app-x86
+```
+
+* Thread 확인하기
+
+```bash
+ps -L -p 184714
+```
+
+| 옵션 | 의미 | 설명 |
+| :--- | :--- | :--- |
+| -p | Process | 대상 프로세스를 지정하는 옵션 |
+| -L | Light-weight process | 스레드의 정보를 출력하는 옵션 <br> (리눅스 커널 내부에서는 스레드를 LWP라고 부른다) |
+
+```bash
+# 결과
+
+    PID     LWP TTY          TIME CMD
+ 184714  184714 pts/1    00:00:00 agent-leak-app-
+ 184714  184895 pts/1    00:00:00 agent-leak-app-
+ 184714  184896 pts/1    00:00:00 agent-leak-app-
+
+ # LWP : 운영체제가 각각의 스레드들에게 부여한 고유번호.
+ # TTY : (Teletypewriter) 사용자와 컴퓨터가 서로 글자를 주고받는 단말기 통로.
+ # TIME : 해당 스레드가 CPU를 써서 실제로 연산을 한 누적 시간.
+ ```
+
+
+## 5. Deadlock 분석
+
+### 5-1. Deadlock 이란?
+
+* 정의
+
+ : 데드락(Deadlock, 교착 상태)은 멀티스레드나 멀티프로세스 환경에서 두 개 이상의 작업이 서로 상대방이 가진 자원(lock)을 무한히 기다리며 그 자리에 딱 멈춰버리는 현상.
+
+* 나타나는 현상
+
+    * 프로세스 무응답 : 사용자의 입력이나 시스템 요청에 전혀 반응하지 않는 frozen 상태가 된다.
+
+    * 리소스 정체 : CPU 사용률이 0%로 고정되어 있고, MEM 사용률도 고정.
+
+* 발생 원인 (발생 메커니즘)
+
+ : 데드락은 시스템 내부에서 공유 자원에 여러 프로세스가 동시에 접근할 때 데이터가 꼬이는 것을 막기 위해 사용하는 Lock 메커니즘 때문에 발생한다.
+
+ 예를 들어, 스레드A와 스레드B가 자원1과 자원2 모두 필요한 상황에서
+    
+    1. 스레드A가 먼저 자원1의 락을 점유
+    2. 동시에 스레드B가 자원2의 락을 점유
+    3. 스레드A는 다음 작업을 위해 자원2의 락을 요청하며 대기.
+    4. 스레드B는 다음 작업을 위해 자원1의 락을 요청하며 대기.
+
+ 두 스레드 모두 자신이 가진 자원을 절대 먼저 내려놓지 않고 상대방이 자원을 풀어주기만을 기다리기 때문에, 이 시점웁터 프로그램은 영원히 멈추게 된다.
+
+* Deadlock 발생의 4대 필수 조건
+
+    * 상호 배제 (Mutual Exclusion) : 자원은 한 번에 한 프로세스만 사용할 수 있어야 한다.
+    * 점유 대기 (Hold and Wait) : 최소한 하나의 자원을 쥔 상태(hold)에서, 다른 프로세스가 쓰고 있는 자원을 얻기 위해 대기(wati)해야 한다.
+    * 비선점 (No Preemption) : 다른 프로세스가 쥐고 있는 자원을 강제로 빼앗아 올 수 없어야 한다.
+    * 순환 대기 (Circular Wait) : 대기하고 있는 프로세스들의 관계가 꼬리를 물고 원형(circle)을 이루어야 한다. (A가 B를 기다리고, B는 A를 기다리는 구조)
+
+* 추가 설명
+
+    * 스레드(thread) : 프로세스(process)가 메모리에 올라와 실행 중인 '프로그램 전체'를 의미한다면, 스레드(thread)는 그 프로그램 내부에서 실제로 코드를 한 줄씩 읽으며 일하는 실질적인 '일꾼'이다.
+
+    * 락(lock) : 여러 개의 스레드가 동시에 일할 때 치명적인 문제가 있는데, 바로 프로세스 내부의 메모리 공간을 모든 스레드가 공유한다는 점이다. 그래서 여러 스레드가 똑같은 데이터(공유 자원)를 동시에 점유하는 것을 막기 위한 안전장치를 lock이라고 한다.
+ 
+
+### 5-2. 환경변수 변경
+
+* student 계정에서 환경변수 변경
+
+```bash
+nano ~/.bashrc
+```
+
+* MULTI_THREAD_ENABLE 옵션 변경하기
+
+```bash
+# 기존 설정
+
+export MULTI_THREAD_ENABLE=true
+```
+
+```bash
+# 변경 후 옵션
+
+export MULTI_THREAD_ENABLE=false
+```
+
+* 변경된 환경변수 적용하기
+
+```bash
+source ~/.bashrc
+```
+
+* 변경됬는지 확인
+
+```bash
+echo $MULTI_THREAD_ENABLE
+```
+
+```bash
+# 결과
+
+false
+```
+
+### 5-3. 앱 실행하기
+
+```bash
+>>> Starting Agent Boot Sequence...
+[1/6] Checking User Account               [OK]
+   ... Running as service user 'student' (uid=1000)
+[2/6] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/6] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/6] Verifying Log Permission            [OK]
+   ... Log directory is writable: /workspace/runtime/logs
+[6/6] Verifying Mission Environment       [OK]
+   ... MEMORY_LIMIT=512MB, CPU_MAX_OCCUPY=30%, MULTI_THREAD_ENABLE=False
+------------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+2026-06-21 12:05:40,729 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-06-21 12:05:40,732 [INFO] Agent listening at port 15034
+
+==================================================
+ [ Agent Initiate ] Resource Check 
+==================================================
+ [ MEMORY ] Limit: 512MB                [ OK ]
+ [ CPU    ] Limit: 30%                  [ OK ]
+ [ THREAD ] Concurrency: False          [ OK ]
+--------------------------------------------------
+ >>> SYSTEM STATUS: STABLE. STARTING WORKLOAD MONITORING...
+==================================================
+
+2026-06-21 12:05:42,743 [INFO] >>> Scenario Selected: [Healthy System Monitoring]
+
+>>> [SYSTEM] ALL CONFIGURATIONS OPTIMAL. RUNNING STABILITY TEST... <<<
+
+2026-06-21 12:05:42,743 [INFO] [Scheduler] Task Scheduler Initialized.
+2026-06-21 12:05:42,744 [INFO] [Scheduler] Registered Tasks: ['Thread-A', 'Thread-B', 'Thread-C']
+2026-06-21 12:05:42,744 [INFO] [Scheduler] Starting task execution...
+2026-06-21 12:05:42,744 [INFO] [Thread-B] Task Started. Calculating... (20%)
+2026-06-21 12:05:42,795 [INFO] [Thread-B] Calculating... (40%)
+2026-06-21 12:05:42,846 [INFO] [Thread-B] Calculating... (60%)
+2026-06-21 12:05:42,896 [INFO] [Thread-B] Calculating... (80%)
+2026-06-21 12:05:42,947 [INFO] [Thread-B] Task Completed. (100%)
+2026-06-21 12:05:42,998 [INFO] [Thread-C] Task Started. Calculating... (20%)
+2026-06-21 12:05:43,049 [INFO] [Thread-C] Calculating... (40%)
+2026-06-21 12:05:43,099 [INFO] [Thread-C] Calculating... (60%)
+2026-06-21 12:05:43,150 [INFO] [Thread-C] Calculating... (80%)
+2026-06-21 12:05:43,201 [INFO] [Thread-C] Task Completed. (100%)
+2026-06-21 12:05:43,252 [INFO] [Thread-A] Task Started. Calculating... (20%)
+2026-06-21 12:05:43,303 [INFO] [Thread-A] Calculating... (40%)
+2026-06-21 12:05:43,353 [INFO] [Thread-A] Calculating... (60%)
+2026-06-21 12:05:43,404 [INFO] [Thread-A] Calculating... (80%)
+2026-06-21 12:05:43,455 [INFO] [Thread-A] Task Completed. (100%)
+2026-06-21 12:05:43,506 [INFO] [Scheduler] All tasks completed.
+2026-06-21 12:05:43,527 [INFO] [CpuWorker] Started. Maximum CPU Limit: 30%
+2026-06-21 12:05:43,528 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-06-21 12:05:43,528 [INFO] [CpuWorker] Current Load: 5.00%
+2026-06-21 12:05:46,577 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-06-21 12:05:46,644 [INFO] [CpuWorker] Current Load: 10.60%
+2026-06-21 12:05:49,624 [INFO] [MemoryWorker] Current Heap: 75MB
+2026-06-21 12:05:49,762 [INFO] [CpuWorker] Current Load: 16.13%
+2026-06-21 12:05:52,676 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-06-21 12:05:52,880 [INFO] [CpuWorker] Current Load: 25.03%
+2026-06-21 12:05:54,992 [INFO] [CpuWorker] Peak reached (30.00%). Starting cooldown...
+2026-06-21 12:05:55,721 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-06-21 12:05:55,999 [INFO] [CpuWorker] Current Load: 30.00%
+2026-06-21 12:05:58,777 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-06-21 12:05:59,111 [INFO] [CpuWorker] Current Load: 28.07%
+2026-06-21 12:06:01,828 [INFO] [MemoryWorker] Current Heap: 175MB
+2026-06-21 12:06:02,228 [INFO] [CpuWorker] Current Load: 27.71%
+2026-06-21 12:06:04,869 [INFO] [MemoryWorker] Current Heap: 200MB
+2026-06-21 12:06:05,345 [INFO] [CpuWorker] Current Load: 25.35%
+2026-06-21 12:06:07,934 [INFO] [MemoryWorker] Current Heap: 225MB
+2026-06-21 12:06:08,462 [INFO] [CpuWorker] Current Load: 19.06%
+2026-06-21 12:06:10,989 [INFO] [MemoryWorker] Current Heap: 250MB
+2026-06-21 12:06:11,576 [INFO] [CpuWorker] Current Load: 15.48%
+2026-06-21 12:06:14,053 [INFO] [MemoryWorker] Current Heap: 275MB
+2026-06-21 12:06:14,693 [INFO] [CpuWorker] Current Load: 12.44%
+2026-06-21 12:06:16,802 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-06-21 12:06:17,098 [INFO] [MemoryWorker] Current Heap: 300MB
+2026-06-21 12:06:17,808 [INFO] [CpuWorker] Current Load: 5.00%
+2026-06-21 12:06:20,134 [INFO] [MemoryWorker] Current Heap: 325MB
+2026-06-21 12:06:20,925 [INFO] [CpuWorker] Current Load: 12.48%
+2026-06-21 12:06:23,172 [INFO] [MemoryWorker] Current Heap: 350MB
+2026-06-21 12:06:24,044 [INFO] [CpuWorker] Current Load: 12.57%
+2026-06-21 12:06:26,229 [INFO] [MemoryWorker] Current Heap: 375MB
+2026-06-21 12:06:27,162 [INFO] [CpuWorker] Current Load: 16.97%
+2026-06-21 12:06:29,255 [INFO] [MemoryWorker] Current Heap: 400MB
+2026-06-21 12:06:30,260 [INFO] [CpuWorker] Current Load: 20.32%
+2026-06-21 12:06:32,281 [INFO] [MemoryWorker] Current Heap: 425MB
+2026-06-21 12:06:33,373 [INFO] [CpuWorker] Current Load: 28.37%
+2026-06-21 12:06:35,345 [INFO] [MemoryWorker] Current Heap: 450MB
+2026-06-21 12:06:35,485 [INFO] [CpuWorker] Peak reached (30.00%). Starting cooldown...
+2026-06-21 12:06:36,491 [INFO] [CpuWorker] Current Load: 30.00%
+2026-06-21 12:06:38,387 [INFO] [MemoryWorker] Current Heap: 475MB
+2026-06-21 12:06:39,609 [INFO] [CpuWorker] Current Load: 24.54%
+2026-06-21 12:06:41,431 [INFO] [MemoryWorker] Current Heap: 500MB
+2026-06-21 12:06:42,721 [INFO] [CpuWorker] Current Load: 14.86%
+2026-06-21 12:06:44,471 [INFO] [MemoryWorker] Current Heap: 525MB
+2026-06-21 12:06:44,472 [WARNING] [MemoryWorker] Memory Usage Reached Limit (525MB). Starting cleanup...
+2026-06-21 12:06:44,513 [INFO] [System] Memory Cache Flushed. Process Stabilized.
+
+>>> [SYSTEM] MEMORY RECOVERED (Cache Cleared) <<<
+```
+
