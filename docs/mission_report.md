@@ -771,13 +771,54 @@ done
 
 ### 4-3. MEMORY_LIMIT=128 일 때
 
+```bash
+>>> Starting Agent Boot Sequence...
+[1/6] Checking User Account          [OK]
+... Running as service user 'student' (uid=1000)
+[2/6] Verifying Environment Variables [OK]
+... All required Envs correct
+[3/6] Checking Required Files        [OK]
+... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability     [OK]
+... Port 15034 is available.
+[5/6] Verifying Log Permission       [OK]
+... Log directory is writable: /workspace/runtime/logs
+[6/6] Verifying Mission Environment  [OK]
+... MEMORY_LIMIT=128MB, CPU_MAX_OCCUPY=30%, MULTI_THREAD_ENABLE=True
+------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+2026-06-17 13:29:08,529 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-06-17 13:29:08,529 [INFO] Agent listening at port 15034
 
+======================================================
+ [ Agent Initiate ] Resource Check
+======================================================
+ [ MEMORY ] Limit: 128MB             [ WARNING: Recommend Over 256MB ]
+ [ CPU    ] Limit: 30%               [ OK ]
+ [ THREAD ] Concurrency: True        [ WARNING ]
+------------------------------------------------------
+>>> SYSTEM WARNING: POTENTIAL DEADLOCK IN CONCURRENT MODE.
+======================================================
+
+2026-06-17 13:29:10,564 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-06-17 13:29:13,621 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-06-17 13:29:16,685 [INFO] [MemoryWorker] Current Heap: 75MB
+2026-06-17 13:29:19,735 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-06-17 13:29:22,776 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-06-17 13:29:25,820 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-06-17 13:29:25,820 [CRITICAL] [MemoryGuard] Memory limit exceeded (150MB >= 128MB) / (Recommend Over 256MB)
+2026-06-17 13:29:25,823 [CRITICAL] [MemoryGuard] Self-terminating process 169723 to prevent system instability.
+
+
+>>> [SYSTEM] SELF-TERMINATED (Memory Limit Exceeded) <<<
+
+Killed
+```
 
 ### 4-4. MEMORY_LIMIT=512 일 때
 
-#### 4-4-1. MEMORY_LIMIT 변경
-
-* 변경
+* MEMORY_LIMIT 변경
 
     ```student 계정```에서
 
@@ -1106,3 +1147,262 @@ Agent READY
 >>> [SYSTEM] MEMORY RECOVERED (Cache Cleared) <<<
 ```
 
+## 6. CPU Spike 분석
+
+### 6-1. CPU Spike 란?
+
+* 정의
+
+ : 평소 일정한 범위를 유지하며 안정적으로 작동하던 CPU 사용률이, 특정 시점에서 가파르게 한계치에 도달하는 현상.
+
+* 나타나는 현상
+
+    * CPU Latency 증가 : 작업 대기 시간이 급증
+    * Throttling(버벅임) 및 Freeze(무응답)
+    * 시스템 Load Average 상승
+
+* 발생 원인
+
+    * 코드 내부의 무한 루프 및 연산 오류 : 조건문 탈출 조건이 잘못되서 무한히 도는 경우
+    * 순간적인 트래픽 폭주 : 순간적으로 많은 사용자가 시스템에 접속하는 경우
+    * 대규모 데이터 처리 : 행렬 연산 같은 복잡도가 높은 알고리즘을 사용하는 경우
+    * 과도한 가비지 컬렉션 : 자바, 파이썬 환경에서 힙 메모리가 가득 찬 경우
+
+### 6-2. 환경변수 수정
+
+* 현재 환경에서는 CPU Spike가 발생하지 않아서 CPU limit을 낮춰야 한다.
+
+```bash
+echo $CPU_MAX_OCCUPY
+```
+
+```bash
+# 결과
+
+30
+```
+
+* student 계정에서 환경변수 변경
+
+```bash
+nano ~/.bashrc
+```
+
+```bash
+# 기존 30에서 80으로 변경
+
+export CPU_MAX_OCCUPY=80
+```
+
+* 수정 된 환경변수 저장
+
+```bash
+source ~/.bashrc
+```
+
+### 6-3. 앱 실행
+
+```bash
+cd /workspace/app
+
+./agent-leak-app-x86
+```
+
+```bash
+>>> Starting Agent Boot Sequence...
+[1/6] Checking User Account               [OK]
+   ... Running as service user 'student' (uid=1000)
+[2/6] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/6] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/6] Verifying Log Permission            [OK]
+   ... Log directory is writable: /workspace/runtime/logs
+[6/6] Verifying Mission Environment       [OK]
+   ... MEMORY_LIMIT=512MB, CPU_MAX_OCCUPY=80%, MULTI_THREAD_ENABLE=False
+------------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+2026-06-22 10:54:37,557 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-06-22 10:54:37,558 [INFO] Agent listening at port 15034
+
+==================================================
+ [ Agent Initiate ] Resource Check 
+==================================================
+ [ MEMORY ] Limit: 512MB                [ OK ]
+ [ CPU    ] Limit: 80%                  [ WARNING: Recommend Under 50% ]
+ [ THREAD ] Concurrency: False          [ OK ]
+--------------------------------------------------
+ >>> SYSTEM STATUS: STABLE. STARTING WORKLOAD MONITORING...
+==================================================
+
+2026-06-22 10:54:39,569 [INFO] [CpuWorker] Started. Maximum CPU Limit: 80%
+2026-06-22 10:54:39,570 [INFO] [CpuWorker] Current Load: 5.00%
+2026-06-22 10:54:42,678 [INFO] [CpuWorker] Current Load: 8.91%
+2026-06-22 10:54:45,795 [INFO] [CpuWorker] Current Load: 9.00%
+2026-06-22 10:54:48,913 [INFO] [CpuWorker] Current Load: 18.29%
+2026-06-22 10:54:52,031 [INFO] [CpuWorker] Current Load: 18.85%
+2026-06-22 10:54:55,149 [INFO] [CpuWorker] Current Load: 21.22%
+2026-06-22 10:54:58,263 [INFO] [CpuWorker] Current Load: 26.87%
+2026-06-22 10:55:01,381 [INFO] [CpuWorker] Current Load: 29.11%
+2026-06-22 10:55:04,497 [INFO] [CpuWorker] Current Load: 30.62%
+2026-06-22 10:55:07,613 [INFO] [CpuWorker] Current Load: 35.15%
+2026-06-22 10:55:10,723 [INFO] [CpuWorker] Current Load: 35.79%
+2026-06-22 10:55:13,837 [INFO] [CpuWorker] Current Load: 43.26%
+2026-06-22 10:55:16,951 [INFO] [CpuWorker] Current Load: 44.70%
+2026-06-22 10:55:20,070 [INFO] [CpuWorker] Current Load: 49.62%
+2026-06-22 10:55:23,187 [INFO] [CpuWorker] Current Load: 58.86%
+2026-06-22 10:55:23,288 [CRITICAL] [CpuWorker] CPU Threshold Violated! (58.86%).
+
+>>> [SYSTEM] WATCHDOG: INITIATING EMERGENCY ABORT (SIGTERM) <<<
+
+Terminated
+```
+
+## 7. 최종 설정값
+
+### 7-1. 문제 / 원인 / 해결
+
+ | 문제 | 원인 | 해결 |
+ | :--- | :--- | :--- |
+ | Memory Leak | 메모리 제한 너무 낮음 | 512MB 이상 | 
+ | Deadlock | 멀티스레드 lock 경쟁 | 멀티스레드 비활성화 |
+ | CPU Spike | CPU limit 너무 높음 | 50% 이하 |
+
+### 7-2. 최종 설정값
+
+```bash
+export MEMORY_LIMIT=512
+export CPU_MAX_OCCUPY=30
+export MULTI_THREAD_ENABLE=false
+```
+
+### 7-3. 변경 된 설정값 확인
+
+```bash
+env | grep -E 'MEMORY_LIMIT|CPU_MAX_OCCUPY|MULTI_THREAD_ENABLE'
+```
+
+```bash
+# 결과
+
+CPU_MAX_OCCUPY=30
+MULTI_THREAD_ENABLE=false
+MEMORY_LIMIT=512
+```
+
+### 7-4. 최종 앱 실행 테스트
+
+```bash
+>>> Starting Agent Boot Sequence...
+[1/6] Checking User Account               [OK]
+   ... Running as service user 'student' (uid=1000)
+[2/6] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/6] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/6] Verifying Log Permission            [OK]
+   ... Log directory is writable: /workspace/runtime/logs
+[6/6] Verifying Mission Environment       [OK]
+   ... MEMORY_LIMIT=512MB, CPU_MAX_OCCUPY=30%, MULTI_THREAD_ENABLE=False
+------------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+2026-06-23 08:24:26,290 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-06-23 08:24:26,292 [INFO] Agent listening at port 15034
+
+==================================================
+ [ Agent Initiate ] Resource Check 
+==================================================
+ [ MEMORY ] Limit: 512MB                [ OK ]
+ [ CPU    ] Limit: 30%                  [ OK ]
+ [ THREAD ] Concurrency: False          [ OK ]
+--------------------------------------------------
+ >>> SYSTEM STATUS: STABLE. STARTING WORKLOAD MONITORING...
+==================================================
+
+2026-06-23 08:24:28,307 [INFO] >>> Scenario Selected: [Healthy System Monitoring]
+
+>>> [SYSTEM] ALL CONFIGURATIONS OPTIMAL. RUNNING STABILITY TEST... <<<
+
+2026-06-23 08:24:28,309 [INFO] [Scheduler] Task Scheduler Initialized.
+2026-06-23 08:24:28,310 [INFO] [Scheduler] Registered Tasks: ['Thread-A', 'Thread-B', 'Thread-C']
+2026-06-23 08:24:28,311 [INFO] [Scheduler] Starting task execution...
+2026-06-23 08:24:28,312 [INFO] [Thread-B] Task Started. Calculating... (20%)
+2026-06-23 08:24:28,365 [INFO] [Thread-B] Calculating... (40%)
+2026-06-23 08:24:28,417 [INFO] [Thread-B] Calculating... (60%)
+2026-06-23 08:24:28,468 [INFO] [Thread-B] Calculating... (80%)
+2026-06-23 08:24:28,519 [INFO] [Thread-B] Task Completed. (100%)
+2026-06-23 08:24:28,571 [INFO] [Thread-C] Task Started. Calculating... (20%)
+2026-06-23 08:24:28,623 [INFO] [Thread-C] Calculating... (40%)
+2026-06-23 08:24:28,674 [INFO] [Thread-C] Calculating... (60%)
+2026-06-23 08:24:28,727 [INFO] [Thread-C] Calculating... (80%)
+2026-06-23 08:24:28,780 [INFO] [Thread-C] Task Completed. (100%)
+2026-06-23 08:24:28,833 [INFO] [Thread-A] Task Started. Calculating... (20%)
+2026-06-23 08:24:28,885 [INFO] [Thread-A] Calculating... (40%)
+2026-06-23 08:24:28,938 [INFO] [Thread-A] Calculating... (60%)
+2026-06-23 08:24:28,990 [INFO] [Thread-A] Calculating... (80%)
+2026-06-23 08:24:29,044 [INFO] [Thread-A] Task Completed. (100%)
+2026-06-23 08:24:29,097 [INFO] [Scheduler] All tasks completed.
+2026-06-23 08:24:29,116 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-06-23 08:24:29,116 [INFO] [CpuWorker] Started. Maximum CPU Limit: 30%
+2026-06-23 08:24:29,117 [INFO] [CpuWorker] Current Load: 5.00%
+2026-06-23 08:24:32,182 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-06-23 08:24:32,246 [INFO] [CpuWorker] Current Load: 10.67%
+2026-06-23 08:24:35,252 [INFO] [MemoryWorker] Current Heap: 75MB
+2026-06-23 08:24:35,360 [INFO] [CpuWorker] Current Load: 12.46%
+2026-06-23 08:24:38,319 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-06-23 08:24:38,478 [INFO] [CpuWorker] Current Load: 17.24%
+2026-06-23 08:24:41,376 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-06-23 08:24:41,612 [INFO] [CpuWorker] Current Load: 26.21%
+2026-06-23 08:24:43,722 [INFO] [CpuWorker] Peak reached (30.00%). Starting cooldown...
+2026-06-23 08:24:44,437 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-06-23 08:24:44,726 [INFO] [CpuWorker] Current Load: 30.00%
+2026-06-23 08:24:47,502 [INFO] [MemoryWorker] Current Heap: 175MB
+2026-06-23 08:24:47,845 [INFO] [CpuWorker] Current Load: 29.79%
+2026-06-23 08:24:50,553 [INFO] [MemoryWorker] Current Heap: 200MB
+2026-06-23 08:24:50,968 [INFO] [CpuWorker] Current Load: 25.81%
+2026-06-23 08:24:51,723 [INFO] [MemoryWorker] Current Heap: 225MB
+2026-06-23 08:24:52,181 [INFO] [CpuWorker] Current Load: 25.53%
+2026-06-23 08:24:54,780 [INFO] [MemoryWorker] Current Heap: 250MB
+2026-06-23 08:24:55,301 [INFO] [CpuWorker] Current Load: 18.57%
+2026-06-23 08:24:57,824 [INFO] [MemoryWorker] Current Heap: 275MB
+2026-06-23 08:24:58,416 [INFO] [CpuWorker] Current Load: 13.12%
+2026-06-23 08:25:00,879 [INFO] [MemoryWorker] Current Heap: 300MB
+2026-06-23 08:25:01,554 [INFO] [CpuWorker] Current Load: 7.29%
+2026-06-23 08:25:03,665 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-06-23 08:25:03,940 [INFO] [MemoryWorker] Current Heap: 325MB
+2026-06-23 08:25:04,676 [INFO] [CpuWorker] Current Load: 5.00%
+2026-06-23 08:25:07,045 [INFO] [MemoryWorker] Current Heap: 350MB
+2026-06-23 08:25:07,808 [INFO] [CpuWorker] Current Load: 7.38%
+2026-06-23 08:25:10,093 [INFO] [MemoryWorker] Current Heap: 375MB
+2026-06-23 08:25:10,931 [INFO] [CpuWorker] Current Load: 10.20%
+2026-06-23 08:25:13,144 [INFO] [MemoryWorker] Current Heap: 400MB
+2026-06-23 08:25:14,051 [INFO] [CpuWorker] Current Load: 17.66%
+2026-06-23 08:25:16,210 [INFO] [MemoryWorker] Current Heap: 425MB
+2026-06-23 08:25:17,222 [INFO] [CpuWorker] Current Load: 21.27%
+2026-06-23 08:25:19,251 [INFO] [MemoryWorker] Current Heap: 450MB
+2026-06-23 08:25:20,337 [INFO] [CpuWorker] Current Load: 22.79%
+2026-06-23 08:25:20,426 [INFO] [MemoryWorker] Current Heap: 475MB
+2026-06-23 08:25:21,554 [INFO] [CpuWorker] Current Load: 24.03%
+2026-06-23 08:25:23,491 [INFO] [MemoryWorker] Current Heap: 500MB
+2026-06-23 08:25:23,671 [INFO] [CpuWorker] Peak reached (30.00%). Starting cooldown...
+2026-06-23 08:25:24,677 [INFO] [CpuWorker] Current Load: 30.00%
+2026-06-23 08:25:26,537 [INFO] [MemoryWorker] Current Heap: 525MB
+2026-06-23 08:25:26,538 [WARNING] [MemoryWorker] Memory Usage Reached Limit (525MB). Starting cleanup...
+2026-06-23 08:25:26,582 [INFO] [System] Memory Cache Flushed. Process Stabilized.
+
+>>> [SYSTEM] MEMORY RECOVERED (Cache Cleared) <<<
+
+2026-06-23 08:25:27,797 [INFO] [CpuWorker] Current Load: 22.86%
+2026-06-23 08:25:30,917 [INFO] [CpuWorker] Current Load: 15.29%
+2026-06-23 08:25:31,635 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-06-23 08:25:34,041 [INFO] [CpuWorker] Current Load: 12.71%
+2026-06-23 08:25:34,671 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-06-23 08:25:37,153 [INFO] [CpuWorker] Current Load: 9.00%
+2026-06-23 08:25:37,699 [INFO] [MemoryWorker] Current Heap: 75MB
+```

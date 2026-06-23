@@ -1,18 +1,67 @@
 # B1-2 리눅스 프로세스 및 시스템 리소스 트러블슈팅
 
-## 1.
+## 1. 프로젝트 개요
 
-## 2.
+ 본 프로젝트는 Linux 환경에서 실행되는 'agent-leak-app' 바이너리를 대상으로 대표적인 시스템 장애 3가지인 **OOM Crash (Memory Leak)**, **CPU Latency (CPU Spike)**, **Deadlock**을 분석하는 트러블슈팅 미션이다.
 
-## 3.
+ 단순히 프로글매이 종료되거나 멈추는 현상을 관찰하는 것에서 끝나는 것이 아니라, Linux 시스템 도구와 애플리케이션 로그를 활용하여 장애의 원인을 추적하고 분석하였다.
 
-## 4. 
+## 2. 개발 환경
 
-| 장애 유형 | OOM Crash | CPU Latency | Deadlock |
-| :--- | :--- | :--- | :--- |
-| 프로세스 상태 | 죽음 | 느려짐 | 유지됨 |
-| CPU 사용량 패턴 | 안정적 | 90% 이상으로 상승 | 0% (정체) |
-| MEM 사용량 패턴 | 급상승 | 안정적 | 변화X (정체) |
+* OS : Ubuntu
+
+* Shall : Bash
+
+* Docker version 29.5.3, build d1c06ef
+
+* git version 2.34.1
+
+## 3. 수행 항목 체크리스트
+
+### 사전 준비
+- [x] 일반 사용자(`student`) 계정으로 실행
+- [x] 필수 환경변수 설정 완료
+- [x] `secret.key` 파일 구성 완료
+- [x] 로그 디렉터리 생성 및 권한 설정 완료
+- [x] `agent-leak-app-x86` 정상 실행 확인
+
+### OOM Crash 분석
+- [x] Memory Leak 재현
+- [x] `monitor.sh`로 메모리 증가 추적
+- [x] MemoryGuard 종료 로그 확보
+- [x] `MEMORY_LIMIT` 변경 전후 비교
+- [x] `oom-report.md` 작성 완료
+
+### Deadlock 분석
+- [x] Deadlock 재현
+- [x] PID 존재 확인
+- [x] 스레드 정체 상태 분석
+- [x] BLOCKED 로그 확보
+- [x] `MULTI_THREAD_ENABLE` 변경 전후 비교
+- [x] `deadlock-report.md` 작성 완료
+
+### CPU Latency 분석
+- [x] CPU Spike 재현
+- [x] CPU 사용률 급상승 구간 수집
+- [x] Watchdog 종료 로그 확보
+- [x] `CPU_MAX_OCCUPY` 변경 전후 비교
+- [x] `cpu-report.md` 작성 완료
+
+## 4. 요약
+
+| 항목 | OOM Crash | CPU Latency | Deadlock |
+|---|---|---|---|
+| 장애 유형 | 메모리 누수 | CPU 과점유 | 교착 상태 |
+| 발생 조건 | `MEMORY_LIMIT` 낮음 | `CPU_MAX_OCCUPY` 높게 설정 | `MULTI_THREAD_ENABLE=true` |
+| 주요 증상 | 메모리 지속 증가 후 강제 종료 | CPU 급상승 후 SIGTERM 종료 | 프로세스는 살아있지만 응답 없음 |
+| PID 상태 | 종료됨 | 종료됨 | 살아있음 |
+| CPU 변화 | 낮음 | 매우 높음 | 0 |
+| Memory 변화 | 지속 상승 | 큰 변화 없음 | 정체 |
+| 로그 특징 | `Memory limit exceeded` | `WATCHDOG... SIGTERM` | `WAITING... BLOCKED` |
+| 원인 | Heap 객체 누적 | Busy Loop / 과도한 연산 | Lock 순환 대기 |
+| OS 관점 | MemoryGuard가 SIGKILL | Watchdog가 SIGTERM | Thread starvation |
+| 임시 조치 | `MEMORY_LIMIT` 증가 | `CPU_MAX_OCCUPY` 조정 | 멀티스레드 비활성화 |
+| 근본 해결 | 메모리 해제 로직 추가 | 연산 최적화 | Lock 순서 통일 |
 
 ## 5. 트러블슈팅
 
