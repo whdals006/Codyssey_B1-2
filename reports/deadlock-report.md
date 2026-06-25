@@ -14,19 +14,25 @@ PID는 살아 있으나 작업이 진행되지 않는 전형적인 Deadlock 상�
 
 ## 2. Evidence & Logs (증거 자료)
 
-### 프로그램 마지막 로그
+### 2-1. 프로그램 마지막 로그
 
-```log
-[Worker-Thread-1] Need resource [Socket_Pool_B] to finish job.
-[Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
-
-[Worker-Thread-2] Need resource [Shared_Memory_A] to write logs.
-[Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
+```bash
+2026-06-17 13:55:27,286 [INFO] [Worker-Thread-1] Process Started. Attempting to lock [Shared_Memory_A]...
+2026-06-17 13:55:27,287 [INFO] [AgentWorker][Worker-Thread-2] Process Started. Attempting to lock [Socket_Pool_B]...
+2026-06-17 13:55:27,288 [INFO] [AgentWorker] Waiting for worker threads to complete transactions...
+2026-06-17 13:55:27,288 [INFO] [AgentWorker][Worker-Thread-2] LOCK ACQUIRED: [Socket_Pool_B]. (Holding...)
+2026-06-17 13:55:27,288 [INFO] [AgentWorker][Worker-Thread-1] LOCK ACQUIRED: [Shared_Memory_A]. (Holding...)
+2026-06-17 13:55:27,289 [INFO] [AgentWorker][Worker-Thread-2] Establishing network connections in Pool B...
+2026-06-17 13:55:27,290 [INFO] [AgentWorker][Worker-Thread-1] Processing critical data in Memory A...
+2026-06-17 13:55:29,297 [INFO] [AgentWorker][Worker-Thread-1] Need resource [Socket_Pool_B] to finish job.
+2026-06-17 13:55:29,297 [INFO] [AgentWorker][Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
+2026-06-17 13:55:29,300 [INFO] [AgentWorker][Worker-Thread-2] Need resource [Shared_Memory_A] to write logs.
+2026-06-17 13:55:29,301 [INFO] [AgentWorker][Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
 ```
 
 로그가 여기서 완전히 멈췄습니다.
 
-### PID 존재 확인
+### 2-2. PID 존재 확인
 
 ```bash
 ps -ef | grep agent | grep -v grep
@@ -41,7 +47,23 @@ student 184714 184713 0 ./agent-leak-app-x86
 
 프로세스가 종료되지 않았습니다.
 
-### Thread 상태 확인
+### 2-3. CPU, MEM 확인
+
+```bash
+ps -o pid,ppid,%cpu,rss,cmd -C agent-leak-app-x86
+```
+
+```bash
+# 결과
+
+   PID    PPID %CPU   RSS CMD
+184713  163493  0.0  2092 ./agent-leak-app-x86
+184714  184713  0.0 17960 ./agent-leak-app-x86
+```
+
+프로세스는 살아 있지만, CPU 사용량이 없는 것을 확인하였습니다.
+
+### 2-4. Thread 상태 확인
 
 ```bash
 ps -L -p 184714
@@ -58,23 +80,6 @@ PID     LWP     TTY      TIME CMD
 
 main thread 1개와 work thread 2개의 존재를 확인하였습니다.
 TIME 항목에서 모두 대기 상태인 것을 알 수 있습니다.
-
-### CPU, MEM 확인
-
-```bash
-ps -o pid,ppid,%cpu,rss,cmd -C agent-leak-app-x86
-```
-
-```bash
-# 결과
-
-   PID    PPID %CPU   RSS CMD
-184713  163493  0.0  2092 ./agent-leak-app-x86
-184714  184713  0.0 17960 ./agent-leak-app-x86
-```
-
-프로세스는 살아 있지만, CPU 사용량이 없는 것을 확인하였습니다.
-
 
 ## 3. Root Cause Analysis (원인 분석)
 
@@ -106,37 +111,64 @@ Thread-2 는 A 자원을 기다리고 있는 상태
  
 ## 4. Workaround & Verification (조치 및 검증)
 
-### Before
+### 4-1. Before
+
+* 환경 변수
 
 ```bash
 export MULTI_THREAD_ENABLE=true
 ```
 
-* 결과
+* 실행 결과
 
     * Deadlock 발생
     * 로그 멈춤
     * CPU idle
     * PID 생존
 
-### After
+### 4-2. After
+
+* 환경 변수
 
 ```bash
 export MULTI_THREAD_ENABLE=false
 ```
+* 로그 결과
 
-* 결과
+```bash
+2026-06-21 12:05:42,743 [INFO] [Scheduler] Task Scheduler Initialized.
+2026-06-21 12:05:42,744 [INFO] [Scheduler] Registered Tasks: ['Thread-A', 'Thread-B', 'Thread-C']
+2026-06-21 12:05:42,744 [INFO] [Scheduler] Starting task execution...
+2026-06-21 12:05:42,744 [INFO] [Thread-B] Task Started. Calculating... (20%)
+2026-06-21 12:05:42,795 [INFO] [Thread-B] Calculating... (40%)
+2026-06-21 12:05:42,846 [INFO] [Thread-B] Calculating... (60%)
+2026-06-21 12:05:42,896 [INFO] [Thread-B] Calculating... (80%)
+2026-06-21 12:05:42,947 [INFO] [Thread-B] Task Completed. (100%)
+2026-06-21 12:05:42,998 [INFO] [Thread-C] Task Started. Calculating... (20%)
+2026-06-21 12:05:43,049 [INFO] [Thread-C] Calculating... (40%)
+2026-06-21 12:05:43,099 [INFO] [Thread-C] Calculating... (60%)
+2026-06-21 12:05:43,150 [INFO] [Thread-C] Calculating... (80%)
+2026-06-21 12:05:43,201 [INFO] [Thread-C] Task Completed. (100%)
+2026-06-21 12:05:43,252 [INFO] [Thread-A] Task Started. Calculating... (20%)
+2026-06-21 12:05:43,303 [INFO] [Thread-A] Calculating... (40%)
+2026-06-21 12:05:43,353 [INFO] [Thread-A] Calculating... (60%)
+2026-06-21 12:05:43,404 [INFO] [Thread-A] Calculating... (80%)
+2026-06-21 12:05:43,455 [INFO] [Thread-A] Task Completed. (100%)
+2026-06-21 12:05:43,506 [INFO] [Scheduler] All tasks completed.
+```
+
+* 실행 결과
 
     * Scheduler 정상 수행
     * Memory/CPU worker 정상 동작
 
-### 비교
+### 4-3. 비교
 
 | 항목 | Before (true) | After (false) |
 |---|---|---|
 | 멀티스레드 | 활성화 | 비활성화 |
-| 프로세스 상태 | Hang | 정상 |
-| CPU 사용 | 0% | 정상 변동 |
+| 프로세스 상태 | 멈춤 | 정상 |
+| CPU 사용 | 0% | 정상 |
 | 로그 출력 | 중단 | 지속 |
 | Deadlock | 발생 | 없음 |
 

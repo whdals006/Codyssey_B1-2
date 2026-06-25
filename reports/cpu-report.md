@@ -19,7 +19,7 @@ Terminated
 
 ## 2. Evidence & Logs (증거 자료)
 
-### 프로그램 로그
+### 2-1. 프로그램 로그
 
 ```bash
 2026-06-22 10:54:39,569 [INFO] [CpuWorker] Started. Maximum CPU Limit: 80%
@@ -50,7 +50,6 @@ CPU 사용률이 지속적으로 상승하다가 58.86%에서 종료되었습니
 
 ## 3. Root Cause Analysis (원인 분석)
 
-
 애플리케이션 내부 'CpuWorker'가 반복 계산 작업을 수행하면서 CPU 사용량이 계속 증가했습니다.
 
  1. CpuWorker가 반복 계산 수행
@@ -72,26 +71,47 @@ CPU 사용률이 지속적으로 상승하다가 58.86%에서 종료되었습니
 
 CPU 임계값을 조정하여 동작을 비교했습니다.
 
-### Before
+### 4-1. Before
+
+* 환경 변수
 
 ```bash
 export CPU_MAX_OCCUPY=80
 ```
 
-### After
+### 4-2. After
+
+* 환경 변수
 
 ```bash
 export CPU_MAX_OCCUPY=30
 ```
 
-### 비교
+* 로그 결과
 
-| 항목 | Before (10%) | After (80%) |
+```bash
+2026-06-23 08:24:35,360 [INFO] [CpuWorker] Current Load: 12.46%
+2026-06-23 08:24:38,319 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-06-23 08:24:38,478 [INFO] [CpuWorker] Current Load: 17.24%
+2026-06-23 08:24:41,376 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-06-23 08:24:41,612 [INFO] [CpuWorker] Current Load: 26.21%
+2026-06-23 08:24:43,722 [INFO] [CpuWorker] Peak reached (30.00%). Starting cooldown...
+2026-06-23 08:24:44,437 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-06-23 08:24:44,726 [INFO] [CpuWorker] Current Load: 30.00%
+2026-06-23 08:24:47,502 [INFO] [MemoryWorker] Current Heap: 175MB
+2026-06-23 08:24:47,845 [INFO] [CpuWorker] Current Load: 29.79%
+2026-06-23 08:24:50,553 [INFO] [MemoryWorker] Current Heap: 200MB
+2026-06-23 08:24:50,968 [INFO] [CpuWorker] Current Load: 25.81%
+```
+
+### 4-3. 비교
+
+| 항목 | Before (80%) | After (30%) |
 |---|---|---|
-| CPU 제한 | 낮음 | 높음 |
-| CPU Spike 허용 범위 | 작음 | 큼 |
-| 생존 시간 | 짧음 | 길어짐 |
-| 종료 시점 | 빠름 | 늦음 |
+| CPU 최대 점유율 | 높음 | 낮음 |
+| 종료 시점 | 58.86% | 종료되지 않음 |
+| 생존 시간 | 짧음 | 장시간 유지 |
+| 결과 | 강제 종료 | cooldown 후 생존 |
 
 ## 5. Conclusion (결론)
 

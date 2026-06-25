@@ -243,3 +243,371 @@
 
             ```bash
             
+
+## 6. 추가 설명
+
+### 6-1. monitor.sh에서 메모리 증가 패턴을 추적하기 위해 사용한 명령어와 데이터 추출 방법
+
+
+### 6-2. 프로세스의 CPU 사용률을 확인하기 위해 선택한 도구와 적용한 옵션
+
+```bash
+ps -o pid,ppid,%cpu,rss,cmd -C agent-leak-app-x86
+```
+
+* ps 명령어
+
+| 명령어 | 의미 | 설명 |
+| :--- | :--- | :--- |
+| ps | process state | 현재 리눅스 시스템에서 실행 중인 프로세스의 상태와 정보를 스냅샷 형태로 출력 |
+| -o | Output format | 출력 포맷을 지정. 원하는 항목만을 보여주는 옵션 |
+| -C | Command name filter | 명령어 이름 필터. 뒤에 적은 '실행 파일 이름'과 일치하는 프로세스만 필터링해서 보여주는 옵션 | 
+
+```bash
+top -p <PID>
+```
+
+* top 명령어
+
+| 명령어 | 의미 | 설명 |
+| :--- | :--- | :--- |
+| top | top | 시스템의 전체적인 자원 상태와 프로세스 순위를 실시간으로 출력 |
+| -p | pid filter | 뒤에 적은 특정 프로세스를 지정하는 옵션 |
+
+### 6-3. 프로세스가 "살아있지만 멈춰있는 상태"를 진단하기 위해 어떤 도구를 어떤 순서로 사용했는지 설명
+
+* 프로세스가 살아있는지 먼저 확인
+
+ ```bash
+ ps -ef | grep agent
+ ```
+
+* CPU/MEM 사용량 확인
+
+ ```bash
+ ps -o pid,ppid,%cpu,rss,cmd -C agent-leak-app-x86
+ ```
+
+* thread 확인
+
+```bash
+ps -L -p <PID>
+```
+
+또는
+
+```bash
+top -H
+```
+
+### 6-4. 메모리 누수가 발생했을 때 애플리케이션의 메모리 보호 정책이 해당 프로세스를 강제 종료하는 이유
+
+OOM Killer가 발동하는 상황까지 가기 전에 애플리케이션 자체적으로 임계치를 정해서 안전하게 프로그램을 종료시키기 위해서이다. 
+
+1. 메모리 누수는 시간이 갈수록 heap 메모리를 계속 점유한다.
+
+    - 메모리 누수는 프로그램이 사용이 끝난 메모리를 반납하지 않고, heap에 데이터가 계속 쌓이는 현상.
+    - heap : 프로그램이 실행되는 도중에 필요에 따라 크기를 자유롭게 결정하고 할당받아서 쓰는 '동적 메모리 공간'.
+    - stack : 프로그램이 실행될 때 컴파일러에 의해 크기가 미리 결정되며, 함수 호출과 함께 자동으로 생성되고 종료 시 알아서 소멸되는 '정적 메모리 공간'.
+
+2. 메모리가 부족해지면 해당 프로세스만 느려지는 게 아니다.
+
+    - 메모리(RAM)는 모든 프로세스가 나누어 쓰는 공공재이다.
+    - 하나의 프로세스가 RAM을 독점하게 되면, 시스템 유지에 필수적인 OS커널조차 메모리가 부족하게 된다.
+    - 전체 시스템 응답 속도 저하가 발생, 심하면 시스템 자체가 멈춤.
+
+3. MemoryGuard와 OOM Killer
+
+    |  | MemoryGuard | OOM Killer |
+    | :--- | :--- | :--- |
+    | 관리 주체 | 애플리케이션 | 리눅스 OS 커널 |
+    | 작동 시점 | 정해둔 임계치를 넘었을 때 | 전체 메모리가 꽉 차서 시스템 전체가 멈추기 직전 |
+    | 목적 | 프로그램이 설정한 임계치를 넘는 것을 예방 | 시스템 전체가 다운되는 것을 방어 |
+    | 비유 | 1차 방어선 | 2차 방어선 |
+
+### 6-5. CPU 과점유 시 단일 프로세스를 종료하는 것이 시스템 보호에 왜 필요한지 근거를 제시
+
+CPU를 과점유 하고 있는 프로세스 하나가 CPU 자원을 독점하여 시스템 전체 응답성을 저하시킬 수 있기 때문이다.
+
+1. CPU는 한정된 공유 자원이다.
+    - CPU는 실시간으로 여러 프로세스가 나눠 쓰는 자원이다.
+
+2. 단일 프로세스의 CPU 과점유는 전체 시스템 지연을 만든다.
+
+### 6-6. 교착 상태(Deadlock)가 발생하는 원리를 "상호 배제"와 "순환 대기" 개념으로 설명
+
+교착 상태(Deadlock)는 두 개 이상의 스레드가 서로가 가진 자원을 내놓기만을 기다리면서 아무 작업을 진행하지 못하는 상태를 의미한다.
+
+1. 상호 배제 (Mutual Exclusion)
+
+    - 정의 : 한 번에 하나의 스레드만 특정 자원을 사용할 수 있다.
+    - 원리 : 하나의 자원을 여러 스레드가 동시에 수정하면 데이터가 꼬이게 된다. 따라서 하나의 스레드가 그 자원을 쓰고 있다면, 다른 스레드들은 접근하지 못하도록 문을 걸어 잠그는(Lock) 보호 조치를 취한다.
+    - 상황 : thread-1이 A자원을 점유하면 다른 스레드는 해당 자원을 사용할 수 없다.
+
+2. 순환 대기 (Circular Wait)
+
+    - 정의 : 스레드들이 서로가 가진 자원을 꼬리에 꼬리를 물고 기다리는 상태
+    - 원리
+        - thread-1 은 thread-2가 가진 B를 기다림
+        - thread-2 은 thread-1이 가진 A를 기다림
+
+결론 : 교착상태(Deadlock)는 여러 스레드가 서로가 점유한 자원을 기다리면서 무한 대기 상태에 빠지는 현상이다. 먼저 상호 배제(Mutual Exclusion)는 특정 자원을 한 번에 하나의 스레드만 사용할 수 있도록 제한하는 특성이다. 이후 순환 대기 (Circular Wait)가 발생하면 교착 상태가 만들어진다.
+
+### 6-7. 로그에서 스레드 간 순환 의존 관계(A→B, B→A)를 어떻게 파악했는지 추적 과정을 설명
+
+```bash
+2026-06-17 13:55:27,288 [INFO] [AgentWorker][Worker-Thread-2] LOCK ACQUIRED: [Socket_Pool_B]. (Holding...)
+2026-06-17 13:55:27,288 [INFO] [AgentWorker][Worker-Thread-1] LOCK ACQUIRED: [Shared_Memory_A]. (Holding...)
+```
+
+Thread-1 이 Shared_Memory_A 의 lock을 획득
+Thread-2 가 Socket_Pool_B 의 lock을 획득
+
+
+```bash
+2026-06-17 13:55:29,297 [INFO] [AgentWorker][Worker-Thread-1] Need resource [Socket_Pool_B] to finish job.
+2026-06-17 13:55:29,297 [INFO] [AgentWorker][Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
+2026-06-17 13:55:29,300 [INFO] [AgentWorker][Worker-Thread-2] Need resource [Shared_Memory_A] to write logs.
+2026-06-17 13:55:29,301 [INFO] [AgentWorker][Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
+```
+
+Thread-1 이 Socket_Pool_B 를 기다림
+Thread-2 가 Shared_Memory_A 를 기다림
+
+### 6-8. 만약 이번 미션의 agent-leak-app이 실제 운영 서버에서 동작하고 있었다면, 메모리 누수를 장애 발생 전에 탐지하기 위해 현재의 monitor.sh를 어떻게 개선하겠는가?
+
+현재 monitor.sh는 실시간 상태 확인용 도구로는 충분하지만, 메모리 누수를 사전에 탐지하기에는 한계가 있다. 
+이를 개선하려면 단순 수치 출력이 아니라 메모리 증가 추세 분석, 임계치 기반 경고, 자동 알림, 증거 수집 기능이 필요하다.
+
+1. 로그 파일 자동 저장 및 그래프화
+
+    - 현재 방식 : 터미널 출력 중심
+    - 개선
+        - CSV 저장 (글자와 쉼표만으로 이루어진 초경량 텍스트 파일로 데이터를 저장)
+        - Grafana 로 그래프 생성
+
+2. Threshold 기반 Alert 추가
+
+    - 현재 방식 : MEMORY_LIMIT 초과 시 앱 내부 MemoryGuard 가 강제 종료
+    - 문제점 : 대응하기에 이미 늦음
+    - 개선 : 위험 구간을 미리 경고
+        - 임계치의 70% → INFO
+        - 임계치의 85% → WARNING
+        - 임계치의 95% → CRITICAL
+
+3. Alert Notification
+
+    - 개선 : 경고 발생 시 자동 알림
+        - Slack (기업용 협업 메신저 프로그램)
+        - Email
+
+### 6-9. 이번 미션에서 겪은 3가지 장애(OOM, CPU Spike, Deadlock) 중 실제 서비스 환경에서 가장 치명적인 것은 무엇이라고 생각하는가? 그 이유와 함께, 해당 장애를 근본적으로 예방하는 방법을 제안
+
+가장 치명적인 장애 : **Deadlock**
+
+1. 이유
+    - (1) 장애 감지가 가장 어렵다
+        - OOM
+            - 메모리가 계속 증가
+            - 로그에 명확한 메시지가 존재
+        - CPU Spike
+            - CPU 사용률이 급상승
+            - ```top```, ```ps```로 바로 확인 가능
+        - Deadlock
+            - 프로세스가 죽지 않음
+            - CPU 사용률이 0%, 메모리 변화 없음
+            - 겉으로 보기에 "정상 실행 중" 인것처럼 보일 수 있다.
+        
+    - (2) 자동 복구가 어렵다
+        - OOM : MemoryGuard 가 강제 종료
+        - CPU Spike : Watchdog 가 강제 종료
+        - Deadlock : 계속 대기
+
+    - (3) 시스템 전체로 장애가 전파될 수 있다
+        - 하나의 핵심 기능에서 deadlock이 발생하면, 그 기능을 호출하려는 다른 서비스들의 스레드까지 줄줄이 대기 상태로 묶이게 된다.
+
+2. 근본적인 예방 방법
+
+    - (1) Lock 순서 통일
+
+        Deadlock은 보통 lock 획득 순서가 다를 때 발생한다. 락 획득 순서를 통일하면 순환 대기가 사라진다.
+
+        (ex) 모든 스레드가 A를 먼저 획득하고 B를 획득하게 만든다. 
+
+    - (2) Timeout Lock 사용
+
+        lock을 요청할 때 최대 대기 시간(lock timeout)을 설정한다.
+
+        (ex) 3초 동안 자원B를 얻지 못하면, 내가 쥐고 있던 자원A를 내려놓고(unlock) 잠시 후에 다시 시도한다.
+
+정리하자면, OOM과 CPU Spike는 시스템이 "죽여서" 보호할 수 있지만, Deadlock은 프로세스가 살아있는 채로 서비스 전체를 멈출 수 있기 때문에 가장 위험하다.
+
+### 6-10. 만약 동일한 서버에서 OOM과 Deadlock이 동시에 발생했다면, 어떤 순서로 트러블슈팅을 진행하겠는가? 우선순위 판단의 근거를 설명
+
+1단계 : OOM 즉각 조치 (서비스 생존) 
+2단계 : Deadlock 분석 및 해결 (재발 방지)
+
+* 1단계 : OOM 즉각 조치 및 서비스 소생
+
+    - 판단 근거
+        - 시스템 전체 안정성에 직접적인 영향을 주기 때문
+        - Deadlock은 특정 프로세스의 무응답이 문제지만, OOM은 시스템 전체 장애로 확대될 가능성이 크기 때문
+
+* 2단계 : Deadlock 현상 분석 및 원인 파악
+
+
+결론적으로, 동시에 발생했다면 먼저 OOM을 해결해야한다.
+이유는 Deadlock은 서비스 일부를 멈추게 하지만, OOM은 서버 전체를 다운시킬 수 있기 때문이다.
+
+### 6-11. 이번 미션의 환경변수 조정은 임시 조치였다. 만약 소스 코드를 직접 수정할 수 있다면, 각 장애 유형별로 어떤 코드 레벨의 개선을 하겠는가?
+
+1. OOM (Memory Leak)
+
+    - 문제 : 메모리가 25MB → 50MB → 75MB 처럼 선형으로 증가
+    
+    - 원인
+
+        - cache 리스트에 데이터를 추가(append)만 함.
+
+            ```bash
+            # cache : 데이터나 값을 미리 복사해 놓는 임시 저장소
+
+            cache = []
+
+            while True:
+                data = load_data()  # 주기적으로 데이터를 가져옴
+                cache.append(data)  # 리스트에 계속 추가만 함
+            ```
+
+       
+    - 코드 개선
+
+        - (1) pop 메서드로 cache에 쌓인 오래된 데이터 제거
+
+            ```bash
+            if len(cache) > 100:    # 만약 cache에 저장된 데이터 개수가 100개를 넘어가면
+            cache.pop(0)            # 가장 앞에 있는(가장 오래된) 데이터 1개를 삭제
+
+            # pop() : list의 특정 위치 값을 제거하면서, 그 값을 return해준다.
+            ```
+
+        - (2) deque 사용
+
+            ```bash
+            # deque : (Double_Ended Queue) 양쪽 끝에서 데이터를 넣고 뺄수 있는 자료구조
+
+            from collections import deque
+
+            cache = deque(maxlen=100)
+
+            # 데이터가 100개를 넘으면 자동으로 가장 오래도니 데이터를 삭제하고 우측에 새 데이터를 넣는다.
+            ```
+
+        - (3) lru_cache 를 사용
+
+            ```bash
+            # LRU = (Least Recently Used) 가장 오랫동안 안 쓴 데이터를 지우는 캐시 알고리즘
+
+            from functools import lru_cache
+            import time
+
+            @Lru_cache(maxsize=100)     # 최대 100개의 결과만 메모리에 보관하는 캐시 설정
+            ```  
+
+2. CPU Spike
+
+    - 문제 : CPU usage가 58% 까지 상승 후 watchdog 종료
+
+    - 원인
+
+        - 무한 루프
+
+            ```bash
+            while True:
+              check_status() # 상태를 체크하는 함수
+            ```
+
+        위 코드처럼 조건문 탈출도 없고 sleep 없는 ```while True```문을 실행하면, cpu는 쉬지 않고 ```check_status()```를 무한 반복 호출하게 된다.
+
+    - 코드 개선
+
+        - (1) 대기 시간 집어넣기
+
+            ```bash
+            time.sleep(1)
+            ```
+
+3. Deadlock
+
+    - 문제
+
+        ```bash
+        Thread-1 locked Shared_Memory_A
+        Thread-1 waiting Socket_Pool_B
+
+        Thread-2 locked Socket_Pool_B
+        Thread-2 waiting Shared_Memory_A
+        ```
+
+    - 원인
+
+        - (1) 상호 배제 (Mutual Exclusion)
+        - (2) 점유 대기 (Hold and Wait)
+        - (3) 비선점 (No Preemption)
+        - (4) 순환 대기 (Circular Wait)
+
+    - 코드 개선
+
+        - (1) Lock 획득 순서 통일 : 모든 thread가 A 획득 후 B 획득 하도록 변경
+
+            ```bash
+            # 모든 thread가 동일 순서
+
+            lockA.acquire()
+            lockB.acquire()
+            ```
+
+        - (2) Timeout Lock 사용 : 특정 자원을 얻기 위해 대기하는 시간에 제한 시간을 설정
+
+            ```bash
+            if lock.acquire(timeout=3):
+
+            else:
+                recover()
+            ```
+
+        - (3) Lock Free 구조 : 잠금장치(lock)를 사용하지 않음
+
+            - Queue 사용
+            - Actor model 사용
+            - Message passing 사용
+
+### 6-12. 다시 이 미션을 처음부터 수행한다면, 트러블슈팅 과정에서 어떤 점을 다르게 접근하겠는가?
+
+처음 미션을 수행할때는 OOM, CPU Spike, Deadlock이 뭔지 모르는 상태에서,
+환경변수를 하나씩 바꿔가면서 실행 로그를 보고 장애의 원인이 뭔지 파악했다.
+
+만약 다시 미션을 수행한다면 무작정 실행하지 않고, '환경변수를 이렇게 수정을 하면 이런 장애가 발생할 것이다' 라는 가설부터 세우고 그 가설을 로그와 관제 데이터를 통해 검증하는 방식으로 접근할 것이다.
+
+현상을 보고 사후에 원인을 찾는 방식은 많은 시간과 비용이 낭비된다.
+가설 검증 기반의 디버깅은 장애 원인의 범위를 좁히고 복구 시간을 단축시킬 수 있음.
+
+11. import/export(가져오기/내보내기)
+
+	* import --from \로 거래를 일괄 등록한다.
+	* export --out \로 조건에 맞는 거래를 CSV로 저장한다.
+	* export는 --month YYYY-MM 또는 --from YYYY-MM-DD --to YYYY-MM-DD 중 하나 이상 조건을 필수로 받는다.
+	* import/export는 아래 CSV 최소 스키마를 고정한다.
+
+	* ```
+      | column | required | 설명 |
+	  | --- | --- | --- |
+	  | date | Y | YYYY-MM-DD |
+	  | type | Y | income / expense |
+	  | category | Y | 등록된 카테고리 |
+	  | amount | Y | 양수 정수 |
+	  | memo | N | 문자열 |
+	  | tags | N | 쉼표(,) 구분 문자열 |
+	  | 공통: UTF-8, 헤더 포함 |   |   |
+      ```
+        
