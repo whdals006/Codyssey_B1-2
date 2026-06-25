@@ -591,23 +591,3 @@ Thread-2 가 Shared_Memory_A 를 기다림
 
 현상을 보고 사후에 원인을 찾는 방식은 많은 시간과 비용이 낭비된다.
 가설 검증 기반의 디버깅은 장애 원인의 범위를 좁히고 복구 시간을 단축시킬 수 있음.
-
-11. import/export(가져오기/내보내기)
-
-	* import --from \로 거래를 일괄 등록한다.
-	* export --out \로 조건에 맞는 거래를 CSV로 저장한다.
-	* export는 --month YYYY-MM 또는 --from YYYY-MM-DD --to YYYY-MM-DD 중 하나 이상 조건을 필수로 받는다.
-	* import/export는 아래 CSV 최소 스키마를 고정한다.
-
-	* ```
-      | column | required | 설명 |
-	  | --- | --- | --- |
-	  | date | Y | YYYY-MM-DD |
-	  | type | Y | income / expense |
-	  | category | Y | 등록된 카테고리 |
-	  | amount | Y | 양수 정수 |
-	  | memo | N | 문자열 |
-	  | tags | N | 쉼표(,) 구분 문자열 |
-	  | 공통: UTF-8, 헤더 포함 |   |   |
-      ```
-        
